@@ -1,12 +1,12 @@
 # AWS 마이그레이션 - 컨텍스트 & 의존성
 
-Last Updated: 2026-03-01 (세션2 완료)
+Last Updated: 2026-03-01 (세션4 완료 — Phase 7+8 완료, 빌드 성공)
 
 ---
 
 ## 🟢 현재 구현 상태
 
-### 백엔드 (`backend/`) — 빌드 성공, RDS 연결 대기 중
+### 백엔드 (`backend/`) — 완전 구현 완료
 ```
 backend/
 ├── src/
@@ -14,7 +14,7 @@ backend/
 │   ├── app.controller.ts     ← GET /health 엔드포인트
 │   ├── main.ts               ← CORS, ValidationPipe, cookieParser, port 3001
 │   ├── prisma/
-│   │   ├── prisma.service.ts ← PrismaClient 래핑 (user/entry/refreshToken getter)
+│   │   ├── prisma.service.ts ← PrismaClient + @prisma/adapter-pg (Prisma v7 호환)
 │   │   └── prisma.module.ts  ← @Global() 모듈
 │   ├── bedrock/
 │   │   ├── bedrock.service.ts ← InvokeModelCommand, 프롬프트 이전 완료, fallback 처리
@@ -23,90 +23,123 @@ backend/
 │   │   ├── auth.controller.ts ← POST /auth/google, /auth/refresh, /auth/logout, GET /auth/me
 │   │   ├── auth.service.ts    ← Google OAuth 교환, JWT 발급, bcrypt 해시 저장
 │   │   ├── auth.module.ts
-│   │   ├── auth.dto.ts        ← GoogleAuthDto
+│   │   ├── auth.dto.ts
 │   │   ├── jwt-auth.guard.ts  ← access_token 쿠키 검증
-│   │   └── current-user.decorator.ts ← @CurrentUser(), JwtPayload 인터페이스
+│   │   └── current-user.decorator.ts
 │   ├── entries/
-│   │   ├── entries.controller.ts ← GET/POST /entries, /entries/today, /dates, DELETE /:id, POST /demo
-│   │   ├── entries.service.ts    ← CRUD + Bedrock 연동, KST 날짜 처리
-│   │   ├── entries.module.ts
-│   │   └── entries.dto.ts        ← CreateEntryDto, GetEntriesQueryDto, DemoEntryDto
+│   │   ├── entries.controller.ts ← GET/POST /entries, /today, /dates, DELETE /:id, POST /demo
+│   │   ├── entries.service.ts    ← CRUD + Bedrock + serialize() → snake_case + presigned GET URL
+│   │   ├── entries.module.ts     ← BedrockModule import만 (FilesModule 없음, circular dep 방지)
+│   │   └── entries.dto.ts
 │   └── files/
 │       ├── files.controller.ts ← POST /entries/:id/paper-diary, /paper-diary/confirm
-│       ├── files.service.ts    ← S3 PutObject presigned URL (15분), deleteFile
+│       ├── files.service.ts    ← S3 PutObject presigned URL (15분) + GetObject presigned URL (1시간) + deleteFile
 │       └── files.module.ts
+├── scripts/
+│   ├── migrate-db.ts          ← Supabase auth/entries → RDS (완료)
+│   ├── migrate-images.ts      ← Supabase Storage → S3 (완료)
+│   └── .env.migrate           ← 실제 Supabase 키 포함 (gitignore 권장)
 ├── prisma/
-│   └── schema.prisma          ← User, RefreshToken, Entry 모델 + 인덱스 완성
-├── prisma.config.ts           ← Prisma v7 설정 (datasource.url 여기서 관리)
-└── .env                       ← 템플릿 값 (실제 RDS/JWT 값 채워야 함)
+│   └── schema.prisma          ← User, RefreshToken, Entry 모델 + 인덱스
+│                                 ⚠️ datasource에 url 없음 (Prisma v7)
+├── prisma.config.ts           ← Prisma v7 설정, DATABASE_URL 여기서 관리
+└── .env                       ← RDS endpoint 설정 완료
+    DATABASE_URL=postgresql://postgres:moodlog-database1@moodlog-rds.c5c80mug6ksq.ap-northeast-2.rds.amazonaws.com:5432/moodlog?sslmode=require
 ```
 
-### 프론트엔드 (`MoodLog/`) — 아직 미수정
-- Supabase/OpenAI 의존성 그대로 존재
-- Phase 7~8 대기 중
+### 프론트엔드 (`MoodLog/`) — Supabase 완전 제거, NestJS API로 전환 완료
+```
+MoodLog/
+├── app/
+│   ├── page.tsx              ← access_token 쿠키 확인 → /home 리다이렉트
+│   ├── home/page.tsx         ← fetchWithAuth('/entries/today') + /entries (SSR)
+│   ├── list/page.tsx         ← fetchWithAuth('/entries?offset=0&limit=7') (SSR)
+│   └── auth/callback/route.ts ← code → POST NestJS /auth/google → Set-Cookie 전달
+├── components/
+│   ├── GoogleLoginButton.tsx  ← Google OAuth URL 직접 생성 (NEXT_PUBLIC_GOOGLE_CLIENT_ID)
+│   ├── Header.tsx             ← GET /auth/me 아바타, POST /auth/logout
+│   ├── HomePageClient.tsx     ← Demo 모드 전용 (Supabase 제거, isDemoMode() 사용)
+│   ├── ListPageClient.tsx     ← Demo 모드 전용 (Supabase 제거)
+│   ├── MoodForm.tsx           ← 로그인: POST /entries JSON; 데모: POST /entries/demo
+│   ├── FilterableEntries.tsx  ← GET /entries? + credentials: include
+│   ├── PaperDiaryUpload.tsx   ← GET /entries/dates + 4단계 S3 업로드 플로우
+│   └── EntryCard.tsx          ← DELETE /entries/:id + credentials: include
+├── lib/
+│   ├── fetchWithAuth.ts       ← NEW: SSR용 access_token 쿠키 포워딩 헬퍼
+│   ├── localStorage.ts        ← Demo 모드 핵심 (무변경)
+│   └── utils.ts               ← KST 날짜 유틸 (무변경)
+└── middleware.ts              ← access_token 쿠키 + moodlog_demo_mode 쿠키 체크
+```
+
+**빌드 상태**: `npm run build` ✅ 성공 (2026-03-01 확인)
 
 ---
 
-## ⚠️ 세션2 핵심 트러블슈팅 기록
+## ⚠️ 세션4 핵심 트러블슈팅 기록
 
-### 1. Prisma v7 호환성 문제
-- **증상**: `prisma generate` 실패 — "url is no longer supported in schema files"
-- **원인**: Prisma v7에서 `schema.prisma`의 `datasource.url` 제거됨
-- **해결**: `prisma.config.ts`에서 `datasource: { url: process.env.DATABASE_URL }` 관리
-- **schema.prisma**에서 `url = env("DATABASE_URL")` 라인 삭제
-- **PrismaService**: `extends PrismaClient` 방식 → getter 위임 방식으로 변경
+### 1. Prisma v7 Driver Adapter 필수
+- **증상**: `PrismaClient({})` 빈 객체 → "Using engine type 'client' requires adapter or accelerateUrl"
+- **해결**: `@prisma/adapter-pg` + `pg` 패키지 설치
   ```ts
-  // prisma.service.ts — getter 패턴 (v7 호환)
-  get user() { return this.client.user; }
-  get entry() { return this.client.entry; }
-  get refreshToken() { return this.client.refreshToken; }
+  // prisma.service.ts
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL?.replace(/[?&]sslmode=[^&]*/g, '') });
+  const adapter = new PrismaPg(pool);
+  this.client = new PrismaClient({ adapter } as any);
+  ```
+- **SSL**: `sslmode=require`를 URL에서 제거하고 Pool에 `ssl: { rejectUnauthorized: false }` 사용
+
+### 2. Supabase listUsers() identities: null
+- **증상**: `auth.admin.listUsers()` 반환 시 `user.identities` = null
+- **해결**: `user.user_metadata.sub` 사용 (Google OAuth sub 값이 여기 있음)
+
+### 3. FilesModule ↔ EntriesModule 순환 의존성
+- **증상**: NestJS circular dependency 빌드 에러
+- **해결**: EntriesService에 S3Client 직접 내장 (FilesModule import 불필요)
+  - `serialize()` 메서드가 `toImageUrl(key)` 호출 → presigned GET URL 생성
+  - FilesService는 업로드용만 담당
+
+### 4. NestJS → 프론트 응답 포맷 불일치
+- **증상**: NestJS/Prisma는 camelCase 반환, 프론트는 snake_case 기대
+- **해결**: EntriesService.serialize()에서 변환
+  ```ts
+  ai_comment: entry.aiComment ?? null,
+  paper_diary_image: await this.toImageUrl(entry.paperDiaryImage),
   ```
 
-### 2. `isolatedModules: true` + `emitDecoratorMetadata` 충돌
-- **증상**: TS1272 — "A type referenced in a decorated signature must be imported with 'import type'"
-- **원인**: `isolatedModules: true`는 NestJS와 충돌 (Request, Response 타입 데코레이터 사용 시)
-- **해결**: `tsconfig.json`에서 `"isolatedModules": false`로 변경
+### 5. RDS 접근 불가
+- **증상 1**: P1001 can't reach database (Security Group 설정 전)
+- **증상 2**: 보안 그룹 추가 후도 실패 → RDS "Publicly accessible" = No
+- **해결**: RDS 설정 → Modify → Publicly accessible = Yes (개발 중 임시)
+- **운영**: EC2만 접근 허용하도록 복원 필요
 
-### 3. cookie-parser import 방식
-- **증상**: TS2349 — `* as cookieParser` 호출 불가
-- **해결**: `require()` 방식으로 변경
-  ```ts
-  const cookieParser = require('cookie-parser') as typeof import('cookie-parser');
-  ```
-
-### 4. Prisma v7 generator 설정
-- **원래 생성된 값** (삭제): `provider = "prisma-client"`, `output = "../generated/prisma"`
-- **수정 후**: `provider = "prisma-client-js"` (output 없음 → node_modules/@prisma/client)
+### 6. PaperDiaryUpload S3 업로드 4단계 플로우
+신규 날짜(일기 없는 날짜)에 업로드 시:
+1. `POST /entries { date, mood, content: "종이 일기" }` → entry.id 획득
+2. `POST /entries/:id/paper-diary` → `{ url, key }` 수신
+3. `PUT url blob` (S3 직접, Content-Type: image/jpeg)
+4. `POST /entries/:id/paper-diary/confirm { s3Key: key }` → DB 저장
 
 ---
 
 ## 📋 환경변수 목록
 
-### 백엔드 `.env` (현재 템플릿 상태, 실제 값 필요)
+### 백엔드 `.env` (실제 값 설정 완료)
 ```env
-DATABASE_URL="postgresql://USER:PASSWORD@RDS_ENDPOINT:5432/moodlog?sslmode=require"
-JWT_ACCESS_SECRET="change-me-access-secret"
-JWT_REFRESH_SECRET="change-me-refresh-secret"
-GOOGLE_CLIENT_ID="your-google-client-id"
-GOOGLE_CLIENT_SECRET="your-google-client-secret"
+DATABASE_URL="postgresql://postgres:moodlog-database1@moodlog-rds.c5c80mug6ksq.ap-northeast-2.rds.amazonaws.com:5432/moodlog?sslmode=require"
+JWT_ACCESS_SECRET="change-me-access-secret"   ← 운영 시 변경 필수
+JWT_REFRESH_SECRET="change-me-refresh-secret" ← 운영 시 변경 필수
+GOOGLE_CLIENT_ID="your-google-client-id"       ← 채워야 함
+GOOGLE_CLIENT_SECRET="your-google-client-secret" ← 채워야 함
 PORT=3001
-FRONTEND_URL="http://localhost:3000"
+FRONTEND_URL="http://localhost:3000"           ← EC2 배포 시 Amplify URL로 변경
 AWS_REGION="ap-northeast-2"
 S3_BUCKET_NAME="moodlog-paper-diaries"
 ```
 
-### 프론트엔드 (Amplify 환경변수)
+### 프론트엔드 (`.env.local` 또는 Amplify 환경변수)
 ```
-NEXT_PUBLIC_API_URL=https://api.moodlog.com
+NEXT_PUBLIC_API_URL=https://api.moodlog.com   ← EC2/NestJS URL
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=<google-client-id>
-```
-
-### 마이그레이션 스크립트 (로컬 실행용)
-```
-SUPABASE_URL=<supabase-url>
-SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
-RDS_DATABASE_URL=<rds-connection-string>
-S3_BUCKET=moodlog-paper-diaries
 ```
 
 ---
@@ -119,88 +152,99 @@ S3_BUCKET=moodlog-paper-diaries
 | POST | `/auth/google` | 없음 | code → JWT 쿠키 발급 |
 | POST | `/auth/refresh` | 쿠키 | 토큰 갱신 |
 | POST | `/auth/logout` | JWT | refresh_token 삭제 |
-| GET | `/auth/me` | JWT | 유저 정보 반환 |
-| GET | `/entries` | JWT | 목록 (offset, limit, mood) |
-| GET | `/entries/today` | JWT | 오늘 항목 (KST 기준) |
-| GET | `/entries/dates` | JWT | 날짜 목록 |
-| POST | `/entries` | JWT | upsert + AI 코멘트 |
-| DELETE | `/entries/:id` | JWT | 삭제 |
-| POST | `/entries/:id/paper-diary` | JWT | presigned URL 반환 |
-| POST | `/entries/:id/paper-diary/confirm` | JWT | S3 key → DB 저장 |
-| POST | `/entries/demo` | 없음, 10/min | AI 코멘트만 반환 |
+| GET | `/auth/me` | JWT | 유저 정보 반환 (avatarUrl 포함) |
+| GET | `/entries` | JWT | 목록 (offset, limit, mood) → snake_case |
+| GET | `/entries/today` | JWT | 오늘 항목 (KST 기준) → snake_case |
+| GET | `/entries/dates` | JWT | 날짜 문자열 배열 |
+| POST | `/entries` | JWT | upsert + AI 코멘트 → snake_case |
+| DELETE | `/entries/:id` | JWT | 삭제 (HTTP 204) |
+| POST | `/entries/:id/paper-diary` | JWT | presigned PUT URL 반환 |
+| POST | `/entries/:id/paper-diary/confirm` | JWT | s3Key → DB 저장 |
+| POST | `/entries/demo` | 없음, 10/min | AI 코멘트만 반환 `{ aiComment }` |
 
----
-
-## 🏗️ 아키텍처 결정 사항 (확정)
-
-> CLAUDE.md `## 4) Architecture Decisions` 항목은 모두 그대로 유지.
-
-### 추가 세부 결정
-- **Prisma v7**: `prisma.config.ts`로 DB URL 관리, schema.prisma에서 url 제거
-- **쿠키 옵션**: 개발 시 `sameSite: 'lax'`, 운영 시 `sameSite: 'none'` (NODE_ENV 분기)
-- **KST 날짜**: `entries.service.ts`에서 `Date.now() + 9h offset`으로 today 계산
-- **DELETE /entries/:id**: S3 이미지는 `paperDiaryImage` key 있을 때만 삭제 (TODO: FilesService 연동)
-- **S3 업로드 플로우**: presigned URL (PUT) → 클라이언트 직접 업로드 → `/confirm`으로 DB key 저장
-- **모노레포 구조**: Next.js는 `MoodLog/`, NestJS는 `backend/`, .git은 루트에 위치
+**응답 포맷 주의**: entries 관련 응답은 모두 snake_case (`ai_comment`, `paper_diary_image`)
 
 ---
 
 ## 📌 다음 세션 즉시 실행 사항
 
-### Phase 0 (AWS 콘솔 수동 작업)
-```
-1. RDS PostgreSQL 15 생성 (t3.micro, ap-northeast-2)
-2. S3 버킷 moodlog-paper-diaries 생성
-3. IAM Role 생성 (BedrockFullAccess + S3FullAccess)
-4. Bedrock 모델 활성화 확인
-5. Google Cloud Console에 redirect URI 추가
-```
-
-### Phase 1-2 마이그레이션 완료
+### Phase 9: EC2 배포
 ```bash
-cd /Users/inseokkim/Desktop/moodLog-migration/backend
-# .env의 DATABASE_URL을 실제 RDS endpoint로 업데이트
-npx prisma migrate dev --name init
-npx prisma studio  # 테이블 확인
+# 1. EC2 인스턴스 생성 (Ubuntu 22.04, t3.small 권장)
+# 2. SSH 접속 후:
+sudo apt update && sudo apt install -y nodejs npm nginx certbot python3-certbot-nginx
+sudo npm install -g pm2 n
+sudo n 20
+
+# 3. NestJS 배포
+cd /home/ubuntu
+git clone <repo> moodLog-migration
+cd moodLog-migration/backend
+npm install
+npm run build
+
+# .env 작성 (실제 값)
+cat > .env << EOF
+DATABASE_URL=...
+JWT_ACCESS_SECRET=<강력한 비밀키>
+JWT_REFRESH_SECRET=<강력한 비밀키>
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+FRONTEND_URL=https://<amplify-domain>
+AWS_REGION=ap-northeast-2
+S3_BUCKET_NAME=moodlog-paper-diaries
+PORT=3001
+EOF
+
+pm2 start dist/main.js --name moodlog-api
+pm2 save
+pm2 startup
+
+# 4. Nginx + SSL 설정
+sudo certbot --nginx -d api.moodlog.com
 ```
 
-### 다음 코드 작업: Phase 6 → 마이그레이션 스크립트
-파일 위치: `backend/scripts/migrate-db.ts` (아직 미생성)
-- Supabase → RDS 데이터 이전
-- `auth.identities`에서 google_id(sub) 추출
-
-### 이후: Phase 7 → 프론트엔드 Auth 전환
-시작 파일: `MoodLog/components/GoogleLoginButton.tsx`
-- supabase.auth.signInWithOAuth() → Google OAuth URL 직접 생성
-- `NEXT_PUBLIC_GOOGLE_CLIENT_ID` 환경변수 사용
+### Phase 9 완료 후: Phase 10 (Amplify 배포)
+```
+Amplify 환경변수:
+- NEXT_PUBLIC_API_URL = https://api.moodlog.com
+- NEXT_PUBLIC_GOOGLE_CLIENT_ID = <google-client-id>
+```
 
 ---
 
-## 핵심 파일 경로
+## 핵심 파일 경로 (현재 상태)
 
-### 제거 대상 (프론트엔드)
+### 삭제 완료
 ```
-MoodLog/lib/supabase/client.ts
-MoodLog/lib/supabase/server.ts
-MoodLog/lib/supabase/middleware.ts
-MoodLog/lib/openai.ts
-MoodLog/app/api/entries/route.ts
-MoodLog/app/api/entries/[id]/route.ts
-MoodLog/app/api/paper-diary/route.ts
-MoodLog/app/api/auth/logout/route.ts
-MoodLog/app/auth/callback/route.ts   ← 새 버전으로 교체
+✅ MoodLog/lib/supabase/           ← 전체 삭제
+✅ MoodLog/lib/openai.ts           ← 삭제
+✅ MoodLog/app/api/               ← 전체 삭제 (entries/, paper-diary/, auth/logout/)
 ```
 
-### 수정 대상 (프론트엔드)
+### 신규 생성 (세션4)
 ```
+MoodLog/lib/fetchWithAuth.ts      ← SSR 쿠키 포워딩 헬퍼
+```
+
+### 수정 완료 (세션4)
+```
+MoodLog/app/page.tsx
+MoodLog/app/home/page.tsx
+MoodLog/app/list/page.tsx
+MoodLog/app/auth/callback/route.ts
 MoodLog/middleware.ts
 MoodLog/components/GoogleLoginButton.tsx
 MoodLog/components/Header.tsx
+MoodLog/components/HomePageClient.tsx
+MoodLog/components/ListPageClient.tsx
 MoodLog/components/MoodForm.tsx
 MoodLog/components/FilterableEntries.tsx
 MoodLog/components/PaperDiaryUpload.tsx
-MoodLog/app/home/page.tsx
-MoodLog/app/list/page.tsx
+MoodLog/components/EntryCard.tsx
+backend/src/entries/entries.service.ts  ← serialize(), toImageUrl() 추가
+backend/src/entries/entries.module.ts   ← BedrockModule만 (circular dep 해결)
+backend/src/files/files.service.ts      ← getPresignedGetUrl() 추가
 ```
 
 ### 유지 대상 (무변경)
@@ -208,6 +252,6 @@ MoodLog/app/list/page.tsx
 MoodLog/lib/localStorage.ts       ← Demo 모드 핵심
 MoodLog/lib/utils.ts              ← KST 날짜 유틸
 MoodLog/components/DemoModeButton.tsx
-MoodLog/components/EntryCard.tsx
 MoodLog/components/EntryDisplay.tsx
+MoodLog/components/ListPageAuthenticated.tsx
 ```

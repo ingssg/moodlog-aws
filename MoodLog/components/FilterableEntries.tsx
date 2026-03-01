@@ -9,6 +9,8 @@ import {
   getDemoEntriesCount,
 } from "@/lib/localStorage";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+
 // 감정 값과 이모지 매핑
 const moodEmojiMap: Record<string, string> = {
   happy: "😊",
@@ -95,8 +97,11 @@ export default function FilterableEntries({
       }
 
       try {
+        const params = new URLSearchParams({ offset: "0", limit: "7" });
+        if (mood !== "all") params.append("mood", mood);
         const response = await fetch(
-          `/api/entries?offset=0&limit=7&mood=${mood}`
+          `${API_URL}/entries?${params}`,
+          { credentials: "include" }
         );
         const data = await response.json();
 
@@ -141,9 +146,11 @@ export default function FilterableEntries({
     }
 
     try {
+      const params = new URLSearchParams({ offset: String(offset), limit: "7" });
+      if (mood !== "all") params.append("mood", mood);
       const response = await fetch(
-        `/api/entries?offset=${offset}&limit=7&mood=${mood}`,
-        { cache: "no-store" } // 캐시 무시하고 최신 데이터 가져오기
+        `${API_URL}/entries?${params}`,
+        { credentials: "include", cache: "no-store" }
       );
       const data = await response.json();
 
@@ -183,9 +190,11 @@ export default function FilterableEntries({
     }
 
     try {
+      const params = new URLSearchParams({ offset: "0", limit: "7" });
+      if (mood !== "all") params.append("mood", mood);
       const response = await fetch(
-        `/api/entries?offset=0&limit=7&mood=${mood}`,
-        { cache: "no-store" } // 캐시 무시하고 최신 데이터 가져오기
+        `${API_URL}/entries?${params}`,
+        { credentials: "include", cache: "no-store" }
       );
       const data = await response.json();
 
@@ -231,10 +240,14 @@ export default function FilterableEntries({
                     ? "all"
                     : emojiToMoodMap[selectedFilter];
                 try {
+                  const params = new URLSearchParams({
+                    offset: "0",
+                    limit: String(displayedEntries.length || 7),
+                  });
+                  if (mood !== "all") params.append("mood", mood);
                   const response = await fetch(
-                    `/api/entries?offset=0&limit=${
-                      displayedEntries.length || 7
-                    }&mood=${mood}`
+                    `${API_URL}/entries?${params}`,
+                    { credentials: "include" }
                   );
                   const data = await response.json();
                   if (data.entries) {

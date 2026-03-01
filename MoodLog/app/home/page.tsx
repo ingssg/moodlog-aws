@@ -1,11 +1,11 @@
 import { cookies } from "next/headers";
-import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import HomePageClient from "@/components/HomePageClient";
 import Header from "@/components/Header";
 import MoodForm from "@/components/MoodForm";
 import EntryDisplay from "@/components/EntryDisplay";
-import { getKSTDateString, getKSTDateStringDaysAgo } from "@/lib/utils";
+import { getKSTDateStringDaysAgo } from "@/lib/utils";
 
 type HomePageProps = {
   searchParams?: {
@@ -14,23 +14,17 @@ type HomePageProps = {
 };
 
 export default async function HomePage({ searchParams }: HomePageProps) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get("access_token")?.value;
 
-  // 로그인 사용자가 있으면 체험 모드 쿠키가 있어도 무시하고 Supabase 데이터만 사용
-  if (!user) {
-    const cookieStore = cookies();
-    const demoModeCookie = cookieStore.get("moodlog_demo_mode");
-
-    // 체험 모드일 때만 클라이언트 컴포넌트로 위임
-    if (demoModeCookie?.value === "true") {
+  if (!accessToken) {
+    const demoMode = cookieStore.get("moodlog_demo_mode")?.value;
+    if (demoMode === "true") {
       return <HomePageClient searchParams={searchParams} />;
     }
-
     redirect("/");
   }
+
   const isLoadingState = searchParams?.loading === "true";
 
   if (isLoadingState) {
@@ -50,38 +44,23 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     );
   }
 
-  // 오늘 날짜 (한국 시간 기준)
-  const today = getKSTDateString();
+  const todayRes = await fetchWithAuth("/entries/today");
+  const todayEntry = todayRes.ok
+    ? await todayRes.text().then((t) => (t.trim() ? JSON.parse(t) : null))
+    : null;
 
-  // 오늘의 일기 가져오기
-  const { data: todayEntry, error } = await supabase
-    .from("entries")
-    .select("*")
-    .eq("user_id", user.id)
-    .eq("date", today)
-    .single();
+  const recentRes = await fetchWithAuth("/entries?offset=0&limit=7");
+  const recentData = recentRes.ok ? await recentRes.json() : { entries: [] };
+  const recentEntries = ((recentData.entries || []) as Array<{ date: string; mood: string }>)
+    .map((e) => ({ date: e.date, mood: e.mood }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 
-  const hasEntryToday = !!todayEntry && !error;
-
-  // 지난 1주일간의 일기 가져오기 (감정 트렌드용, 한국 시간 기준)
-  const oneWeekAgoStr = getKSTDateStringDaysAgo(6); // 오늘 포함 7일
-
-  const { data: recentEntries } = await supabase
-    .from("entries")
-    .select("date, mood")
-    .eq("user_id", user.id)
-    .gte("date", oneWeekAgoStr)
-    .lte("date", today)
-    .order("date", { ascending: true });
-
-  // 서버에서 지난 1주일 날짜 배열 미리 계산 (hydration 일치 보장)
   const weekDates: Array<{ date: string; dayName: string }> = [];
   for (let i = 6; i >= 0; i--) {
     const dateStr = getKSTDateStringDaysAgo(i);
     const date = new Date(dateStr + "T00:00:00+09:00");
     const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
-    const dayName = dayNames[date.getDay()];
-    weekDates.push({ date: dateStr, dayName });
+    weekDates.push({ date: dateStr, dayName: dayNames[date.getDay()] });
   }
 
   return (
@@ -91,10 +70,10 @@ export default async function HomePage({ searchParams }: HomePageProps) {
           <div className="layout-content-container flex w-full flex-col max-w-4xl flex-1">
             <Header showNav currentPage="home" />
             <main className="flex-grow pt-6 sm:pt-12 pb-6 sm:pb-8 px-2 sm:px-4">
-              {hasEntryToday && todayEntry ? (
+              {todayEntry ? (
                 <EntryDisplay
                   entry={todayEntry}
-                  recentEntries={recentEntries || []}
+                  recentEntries={recentEntries}
                   weekDates={weekDates}
                 />
               ) : (

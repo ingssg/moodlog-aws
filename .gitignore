@@ -3,6 +3,9 @@
 *.pem
 *.log
 
+# Claude Code
+.claude/
+
 # Env files
 .env
 .env*.local

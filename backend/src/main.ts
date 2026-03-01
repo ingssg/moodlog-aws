@@ -1,3 +1,5 @@
+import * as dotenv from 'dotenv';
+dotenv.config();
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-require-imports

@@ -17,7 +17,9 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "migrate:db": "npx ts-node -r tsconfig-paths/register scripts/migrate-db.ts",
+    "migrate:images": "npx ts-node -r tsconfig-paths/register scripts/migrate-images.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1000.0",
@@ -27,13 +29,16 @@
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/throttler": "^6.5.0",
+    "@prisma/adapter-pg": "^7.4.2",
     "@prisma/client": "^7.4.2",
+    "@types/pg": "^8.18.0",
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.3.1",
     "jsonwebtoken": "^9.0.3",
+    "pg": "^8.19.0",
     "prisma": "^7.4.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
@@ -44,6 +49,7 @@
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.0.1",
+    "@supabase/supabase-js": "^2.98.0",
     "@types/bcrypt": "^6.0.0",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.0",

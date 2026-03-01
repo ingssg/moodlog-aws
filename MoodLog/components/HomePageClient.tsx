@@ -8,10 +8,8 @@ import {
   isDemoMode,
   getDemoEntries,
   type DemoEntry,
-  disableDemoMode,
 } from "@/lib/localStorage";
 import { getKSTDateString, getKSTDateStringDaysAgo } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/client";
 
 type HomePageClientProps = {
   searchParams?: {
@@ -27,47 +25,23 @@ export default function HomePageClient({ searchParams }: HomePageClientProps) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const checkAndLoadData = async () => {
-      // 로그인 사용자가 있으면 체험 모드를 사용하지 않음 (Supabase 데이터 사용)
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    if (!isDemoMode()) {
+      window.location.href = "/";
+      return;
+    }
 
-      if (user) {
-        // 로그인 사용자가 있으면 체험 모드 데이터 삭제하고 리다이렉트
-        disableDemoMode();
-        document.cookie = "moodlog_demo_mode=; path=/; max-age=0";
-        window.location.href = "/home";
-        return;
-      }
+    const today = getKSTDateString();
+    const oneWeekAgoStr = getKSTDateStringDaysAgo(6);
+    const entries = getDemoEntries();
 
-      // 체험 모드가 아니면 리다이렉트
-      if (!isDemoMode()) {
-        window.location.href = "/";
-        return;
-      }
-
-      const loadData = () => {
-        const today = getKSTDateString();
-        const oneWeekAgoStr = getKSTDateStringDaysAgo(6);
-
-        const entries = getDemoEntries();
-        const todayEntryData = entries.find((e) => e.date === today);
-        const recentEntriesData = entries
-          .filter((e) => e.date >= oneWeekAgoStr && e.date <= today)
-          .map((e) => ({ date: e.date, mood: e.mood }))
-          .sort((a, b) => a.date.localeCompare(b.date));
-
-        setTodayEntry(todayEntryData || null);
-        setRecentEntries(recentEntriesData);
-        setIsLoading(false);
-      };
-
-      loadData();
-    };
-
-    checkAndLoadData();
+    setTodayEntry(entries.find((e) => e.date === today) || null);
+    setRecentEntries(
+      entries
+        .filter((e) => e.date >= oneWeekAgoStr && e.date <= today)
+        .map((e) => ({ date: e.date, mood: e.mood }))
+        .sort((a, b) => a.date.localeCompare(b.date))
+    );
+    setIsLoading(false);
   }, [searchParams]);
 
   const isLoadingState = searchParams?.loading === "true";

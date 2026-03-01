@@ -1,7 +1,7 @@
 import Logo from "@/components/Logo";
 import GoogleLoginButton from "@/components/GoogleLoginButton";
 import DemoModeButton from "@/components/DemoModeButton";
-import { createClient } from "@/lib/supabase/server";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 export default async function LandingPage({
@@ -9,12 +9,10 @@ export default async function LandingPage({
 }: {
   searchParams: { error?: string; message?: string };
 }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get("access_token")?.value;
 
-  if (user) {
+  if (accessToken) {
     redirect("/home");
   }
 

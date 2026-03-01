@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { S3Client, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -27,6 +27,11 @@ export class FilesService {
     const url = await getSignedUrl(this.s3, command, { expiresIn: 15 * 60 });
 
     return { url, key };
+  }
+
+  async getPresignedGetUrl(key: string): Promise<string> {
+    const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
+    return getSignedUrl(this.s3, command, { expiresIn: 60 * 60 }); // 1시간
   }
 
   async deleteFile(key: string): Promise<void> {

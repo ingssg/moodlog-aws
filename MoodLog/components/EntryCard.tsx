@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import { isDemoMode, deleteDemoEntry } from "@/lib/localStorage";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+
 // 감정 값과 이모지 매핑
 const moodEmojiMap: Record<string, string> = {
   happy: "😊",
@@ -85,9 +87,10 @@ export default function EntryCard({
           window.location.reload();
         }
       } else {
-        // 로그인 모드: API로 삭제
-        const response = await fetch(`/api/entries/${entry.id}`, {
+        // 로그인 모드: NestJS API로 삭제
+        const response = await fetch(`${API_URL}/entries/${entry.id}`, {
           method: "DELETE",
+          credentials: "include",
         });
 
         if (response.ok) {
@@ -97,8 +100,8 @@ export default function EntryCard({
             window.location.reload();
           }
         } else {
-          const error = await response.json();
-          window.alert(error.error || "일기 삭제에 실패했습니다.");
+          const error = await response.json().catch(() => ({}));
+          window.alert(error.message || error.error || "일기 삭제에 실패했습니다.");
         }
       }
     } catch (error) {

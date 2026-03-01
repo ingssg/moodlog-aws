@@ -6,6 +6,8 @@ import { useState } from "react";
 import { isDemoMode, saveDemoEntry, getDemoEntries } from "@/lib/localStorage";
 import { getKSTDateString } from "@/lib/utils";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+
 export default function MoodForm() {
   const router = useRouter();
   const [selectedMood, setSelectedMood] = useState<string>("");
@@ -31,47 +33,57 @@ export default function MoodForm() {
     router.push("/home?loading=true");
 
     try {
-      const formData = new FormData();
-      formData.append("mood", selectedMood);
-      formData.append("content", content);
+      const demo = isDemoMode();
 
-      const response = await fetch("/api/entries", {
-        method: "POST",
-        body: formData,
-      });
+      if (demo) {
+        // 체험 모드: /entries/demo로 AI 코멘트만 받기
+        const res = await fetch(`${API_URL}/entries/demo`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: content.trim(), mood: selectedMood }),
+        });
 
-      if (response.ok) {
-        const data = await response.json();
+        const data = res.ok ? await res.json() : {};
+        const today = getKSTDateString();
+        const entries = getDemoEntries();
+        const existingEntry = entries.find((e) => e.date === today);
+        const entryId = existingEntry
+          ? existingEntry.id
+          : `demo_${today}_${Date.now()}`;
 
-        // 체험 모드일 때는 로컬스토리지에 저장
-        if (isDemoMode()) {
-          const today = getKSTDateString();
-          // 같은 날짜의 일기가 있으면 업데이트, 없으면 새로 생성
-          const entries = getDemoEntries();
-          const existingEntry = entries.find((e) => e.date === today);
-          const entryId = existingEntry
-            ? existingEntry.id
-            : `demo_${today}_${Date.now()}`;
-
-          saveDemoEntry({
-            id: entryId,
+        saveDemoEntry({
+          id: entryId,
+          date: today,
+          content: content.trim(),
+          mood: selectedMood,
+          ai_comment: data.aiComment || "",
+        });
+      } else {
+        // 로그인 모드: NestJS /entries
+        const today = getKSTDateString();
+        const res = await fetch(`${API_URL}/entries`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
             date: today,
             content: content.trim(),
             mood: selectedMood,
-            ai_comment: data.aiComment || "",
-          });
-        }
+          }),
+        });
 
-        router.replace("/home");
-        router.refresh();
-      } else {
-        const error = await response.json();
-        alert(error.error || "일기 저장에 실패했습니다.");
-        router.replace("/home");
-        router.refresh();
+        if (!res.ok) {
+          const error = await res.json();
+          alert(error.message || "일기 저장에 실패했습니다.");
+          router.replace("/home");
+          router.refresh();
+          return;
+        }
       }
-    } catch (error) {
-      // console.error("Error saving entry:", error);
+
+      router.replace("/home");
+      router.refresh();
+    } catch {
       alert("일기 저장 중 오류가 발생했습니다.");
       router.replace("/home");
       router.refresh();

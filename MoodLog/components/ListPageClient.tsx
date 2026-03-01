@@ -7,43 +7,21 @@ import {
   isDemoMode,
   getDemoEntriesFiltered,
   type DemoEntry,
-  disableDemoMode,
 } from "@/lib/localStorage";
-import { createClient } from "@/lib/supabase/client";
 
 export default function ListPageClient() {
   const [entries, setEntries] = useState<DemoEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const checkAndLoadData = async () => {
-      // 로그인 사용자가 있으면 체험 모드를 사용하지 않음 (Supabase 데이터 사용)
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    if (!isDemoMode()) {
+      window.location.href = "/";
+      return;
+    }
 
-      if (user) {
-        // 로그인 사용자가 있으면 체험 모드 데이터 삭제하고 리다이렉트
-        disableDemoMode();
-        document.cookie = "moodlog_demo_mode=; path=/; max-age=0";
-        window.location.href = "/list";
-        return;
-      }
-
-      // 체험 모드가 아니면 리다이렉트
-      if (!isDemoMode()) {
-        window.location.href = "/";
-        return;
-      }
-
-      // 초기 7개만 가져오기
-      const initialEntries = getDemoEntriesFiltered(undefined, 0, 7);
-      setEntries(initialEntries);
-      setIsLoading(false);
-    };
-
-    checkAndLoadData();
+    const initialEntries = getDemoEntriesFiltered(undefined, 0, 7);
+    setEntries(initialEntries);
+    setIsLoading(false);
   }, []);
 
   if (isLoading) {
@@ -80,4 +58,3 @@ export default function ListPageClient() {
     </div>
   );
 }
-

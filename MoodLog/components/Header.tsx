@@ -1,11 +1,11 @@
 "use client";
 
 import Logo from "./Logo";
-import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
-import Link from "next/link";
 import { disableDemoMode } from "@/lib/localStorage";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
 interface HeaderProps {
   showNav?: boolean;
@@ -19,21 +19,12 @@ export default function Header({ showNav = false, currentPage }: HeaderProps) {
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const fetchUser = async () => {
-      const supabase = createClient();
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (user) {
-        // Google OAuth의 경우 user_metadata에 avatar_url 또는 picture가 있음
-        const profileImage =
-          user.user_metadata?.avatar_url || user.user_metadata?.picture || null;
-        setAvatarUrl(profileImage);
-      }
-    };
-
-    fetchUser();
+    fetch(`${API_URL}/auth/me`, { credentials: "include" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.avatarUrl) setAvatarUrl(data.avatarUrl);
+      })
+      .catch(() => {});
   }, []);
 
   // 외부 클릭 시 드롭다운 닫기
@@ -57,12 +48,13 @@ export default function Header({ showNav = false, currentPage }: HeaderProps) {
   }, [isDropdownOpen]);
 
   const handleLogout = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
+    await fetch(`${API_URL}/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    }).catch(() => {});
+
     setIsDropdownOpen(false);
-    // 로그아웃 시 체험 모드 데이터도 삭제 (혼선 방지)
     disableDemoMode();
-    // 쿠키도 삭제
     document.cookie = "moodlog_demo_mode=; path=/; max-age=0";
     router.push("/");
     router.refresh();
@@ -71,7 +63,7 @@ export default function Header({ showNav = false, currentPage }: HeaderProps) {
   const handleNavigation = (path: string) => {
     setIsDropdownOpen(false);
     router.push(path);
-    router.refresh(); // 서버 컴포넌트 캐시 무시하고 새로고침
+    router.refresh();
   };
 
   return (
@@ -131,7 +123,6 @@ export default function Header({ showNav = false, currentPage }: HeaderProps) {
             {/* 드롭다운 메뉴 */}
             {isDropdownOpen && (
               <div className="absolute right-0 mt-2 w-32 bg-white dark:bg-card-dark rounded-lg shadow-lg border border-border-light dark:border-border-dark py-1.5 z-50 transform transition-all duration-200 ease-out origin-top-right">
-                {/* 모바일: 모든 메뉴 표시, 데스크탑: 모든 메뉴 표시 (일관성) */}
                 {currentPage === "home" ? (
                   <button
                     onClick={() => handleNavigation("/list")}

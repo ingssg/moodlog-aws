@@ -70,7 +70,7 @@ export class BedrockService {
     try {
       const body = JSON.stringify({
         anthropic_version: 'bedrock-2023-05-31',
-        max_tokens: 120,
+        max_tokens: 400,
         temperature: 0.7,
         messages: [
           {

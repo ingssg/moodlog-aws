@@ -1,109 +1,78 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { cookies } from "next/headers";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
-  const error_description = requestUrl.searchParams.get("error_description");
   const error = requestUrl.searchParams.get("error");
+  const error_description = requestUrl.searchParams.get("error_description");
   const origin = requestUrl.origin;
 
-  // console.log("Callback received:", {
-  //   code: code ? "present" : "missing",
-  //   error,
-  //   error_description,
-  //   fullUrl: requestUrl.toString(),
-  // });
-
-  // Handle OAuth errors
   if (error || error_description) {
-    // console.error("OAuth error:", { error, error_description });
     return NextResponse.redirect(
-      `${origin}/?error=auth_failed&message=${encodeURIComponent(error_description || error || "Unknown error")}`
+      `${origin}/?error=auth_failed&message=${encodeURIComponent(
+        error_description || error || "Unknown error"
+      )}`
     );
   }
 
   if (!code) {
-    // console.error("No code provided in callback");
-    return NextResponse.redirect(`${origin}/?error=auth_failed&message=no_code`);
+    return NextResponse.redirect(
+      `${origin}/?error=auth_failed&message=no_code`
+    );
   }
 
   try {
-    const cookieStore = cookies();
-    let response = NextResponse.redirect(`${origin}/home`);
+    const redirectUri = `${origin}/auth/callback`;
 
-    // Debug: Log all cookies
-    const allCookies = cookieStore.getAll();
-    // console.log("=== Callback Start ===");
-    // console.log("All cookies in callback:", allCookies.map(c => ({ name: c.name, hasValue: !!c.value })));
-    // console.log("Looking for PKCE code_verifier cookie...");
-    
-    // Check for specific Supabase cookies
-    const supabaseCookies = allCookies.filter(c => 
-      c.name.includes('supabase') || 
-      c.name.includes('code') || 
-      c.name.includes('verifier') ||
-      c.name.includes('pkce')
-    );
-    // console.log("Supabase-related cookies:", supabaseCookies.map(c => c.name));
+    // NestJS에 code 전달 → JWT 쿠키 수신
+    const apiResponse = await fetch(`${API_URL}/auth/google`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, redirectUri }),
+    });
 
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          async get(name: string) {
-            return cookieStore.get(name)?.value;
-          },
-          async set(
-            name: string,
-            value: string,
-            options?: Parameters<typeof response.cookies.set>[2]
-          ) {
-            cookieStore.set(name, value, options);
-            response.cookies.set(name, value, options);
-          },
-          async remove(
-            name: string,
-            options?: Parameters<typeof response.cookies.set>[2]
-          ) {
-            cookieStore.delete(name);
-            response.cookies.delete(name);
-          },
-        },
-      }
-    );
-
-    const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-    
-    if (exchangeError) {
-      // console.error("Error exchanging code for session:", exchangeError);
+    if (!apiResponse.ok) {
+      const body = await apiResponse.json().catch(() => ({}));
+      const message = body.message || "auth_failed";
       return NextResponse.redirect(
-        `${origin}/?error=auth_failed&message=${encodeURIComponent(exchangeError.message)}`
+        `${origin}/?error=auth_failed&message=${encodeURIComponent(message)}`
       );
     }
 
-    // Verify that we have a session
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    // /home으로 리다이렉트하면서 NestJS의 Set-Cookie를 브라우저에 전달
+    const redirectResponse = NextResponse.redirect(`${origin}/home`);
 
-    if (!user) {
-      // console.error("No user after session exchange");
-      return NextResponse.redirect(`${origin}/?error=auth_failed&message=no_user`);
+    // Set-Cookie 헤더 파싱 후 cookies.set() 으로 전달 (headers.append 방식은 Next.js에서 미동작)
+    const setCookies = apiResponse.headers.getSetCookie?.() ?? [];
+    for (const cookie of setCookies) {
+      const parts = cookie.split(";").map((s) => s.trim());
+      const [name, ...valParts] = parts[0].split("=");
+      const value = valParts.join("=");
+      const maxAgePart = parts.find((p) =>
+        p.toLowerCase().startsWith("max-age=")
+      );
+      const maxAge = maxAgePart ? parseInt(maxAgePart.split("=")[1]) : undefined;
+      redirectResponse.cookies.set(name.trim(), value.trim(), {
+        httpOnly: true,
+        path: "/",
+        maxAge,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {}),
+      });
     }
 
-    // 로그인 성공 시 체험 모드 쿠키 삭제 (서버 사이드에서는 쿠키만 삭제)
-    response.cookies.delete("moodlog_demo_mode");
+    // 로그인 성공 시 체험 모드 쿠키 삭제
+    redirectResponse.cookies.delete("moodlog_demo_mode");
 
-    // console.log("Session exchange successful, redirecting to home");
-    return response;
+    return redirectResponse;
   } catch (err) {
-    // console.error("Unexpected error in callback:", err);
     return NextResponse.redirect(
-      `${origin}/?error=auth_failed&message=${encodeURIComponent(err instanceof Error ? err.message : "Unexpected error")}`
+      `${origin}/?error=auth_failed&message=${encodeURIComponent(
+        err instanceof Error ? err.message : "Unexpected error"
+      )}`
     );
   }
 }
-

@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { isDemoMode, getDemoEntries } from "@/lib/localStorage";
 import { getKSTDateString } from "@/lib/utils";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
 interface PaperDiaryUploadProps {
   entries: Array<{ date: string }>;
@@ -38,38 +39,25 @@ export default function PaperDiaryUpload({
       setIsLoadingDates(true);
       const dates = new Set<string>();
 
-      // 현재 표시된 entries의 날짜 추가
       entries.forEach((entry) => {
         dates.add(entry.date);
       });
 
-      // 체험 모드가 아니면 API에서 모든 날짜 가져오기
-      if (!isDemoMode()) {
-        try {
-          const supabase = createClient();
-          const {
-            data: { user },
-          } = await supabase.auth.getUser();
-
-          if (user) {
-            // 모든 entries의 날짜 가져오기
-            const { data: allEntries } = await supabase
-              .from("entries")
-              .select("date")
-              .eq("user_id", user.id);
-
-            allEntries?.forEach((entry) => {
-              dates.add(entry.date);
-            });
-          }
-        } catch (error) {}
-      } else {
-        // 체험 모드: 로컬스토리지에서 모든 날짜 가져오기
-        const { getDemoEntries } = await import("@/lib/localStorage");
+      if (isDemoMode()) {
         const allEntries = getDemoEntries();
         allEntries.forEach((entry) => {
           dates.add(entry.date);
         });
+      } else {
+        try {
+          const res = await fetch(`${API_URL}/entries/dates`, {
+            credentials: "include",
+          });
+          if (res.ok) {
+            const allDates: string[] = await res.json();
+            allDates.forEach((d) => dates.add(d));
+          }
+        } catch {}
       }
 
       setExistingDates(dates);
@@ -80,9 +68,7 @@ export default function PaperDiaryUpload({
   }, [isOpen, entries]);
 
   const handleDateSelect = (date: string) => {
-    if (existingDates.has(date)) {
-      return; // 이미 일기가 있는 날짜는 선택 불가
-    }
+    if (existingDates.has(date)) return;
     setSelectedDate(date);
   };
 
@@ -90,15 +76,13 @@ export default function PaperDiaryUpload({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // 이미지 파일만 허용
     if (!file.type.startsWith("image/")) {
       alert("이미지 파일만 업로드 가능합니다.");
       e.target.value = "";
       return;
     }
 
-    // 파일 크기 검증 (10MB 제한)
-    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+    const MAX_FILE_SIZE = 10 * 1024 * 1024;
     if (file.size > MAX_FILE_SIZE) {
       alert(
         `이미지 파일 크기는 10MB 이하여야 합니다. (현재: ${(
@@ -113,7 +97,6 @@ export default function PaperDiaryUpload({
 
     setSelectedFile(file);
 
-    // 미리보기 이미지 생성
     const reader = new FileReader();
     reader.onloadend = () => {
       setPreviewImage(reader.result as string);
@@ -130,28 +113,61 @@ export default function PaperDiaryUpload({
     setIsUploading(true);
 
     try {
+      const optimizedImage = await optimizeImage(selectedFile);
+
       if (isDemoMode()) {
-        // 체험 모드: 로컬스토리지에 저장
-        const optimizedImage = await optimizeImage(selectedFile);
         await saveToLocalStorage(selectedDate, optimizedImage, selectedMood);
         alert("종이 일기가 업로드되었습니다.");
       } else {
-        // 로그인 모드: 서버 API를 통해 업로드
-        const optimizedImage = await optimizeImage(selectedFile);
-        const blob = await dataURLToBlob(optimizedImage);
-        const formData = new FormData();
-        formData.append("date", selectedDate);
-        formData.append("mood", selectedMood);
-        formData.append("image", blob, "diary.jpg");
-
-        const response = await fetch("/api/paper-diary", {
+        // 1. 엔트리 생성
+        const entryRes = await fetch(`${API_URL}/entries`, {
           method: "POST",
-          body: formData,
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            date: selectedDate,
+            mood: selectedMood,
+            content: "종이 일기",
+          }),
         });
+        if (!entryRes.ok) {
+          throw new Error("일기 생성에 실패했습니다.");
+        }
+        const entry = await entryRes.json();
 
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error || "업로드 실패");
+        // 2. Presigned PUT URL 요청
+        const urlRes = await fetch(
+          `${API_URL}/entries/${entry.id}/paper-diary`,
+          { method: "POST", credentials: "include" }
+        );
+        if (!urlRes.ok) {
+          throw new Error("업로드 URL 발급에 실패했습니다.");
+        }
+        const { url, key } = await urlRes.json();
+
+        // 3. S3에 직접 PUT
+        const blob = await dataURLToBlob(optimizedImage);
+        const s3Res = await fetch(url, {
+          method: "PUT",
+          body: blob,
+          headers: { "Content-Type": "image/jpeg" },
+        });
+        if (!s3Res.ok) {
+          throw new Error("이미지 업로드에 실패했습니다.");
+        }
+
+        // 4. 업로드 완료 확인
+        const confirmRes = await fetch(
+          `${API_URL}/entries/${entry.id}/paper-diary/confirm`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ s3Key: key }),
+          }
+        );
+        if (!confirmRes.ok) {
+          throw new Error("이미지 저장에 실패했습니다.");
         }
 
         alert("종이 일기가 업로드되었습니다.");
@@ -164,21 +180,13 @@ export default function PaperDiaryUpload({
       setPreviewImage(null);
       onUploadComplete?.();
     } catch (error: any) {
-      const errorMessage =
-        error?.message ||
-        error?.error?.message ||
-        "이미지 업로드 중 오류가 발생했습니다.";
-      alert(errorMessage);
+      alert(error?.message || "이미지 업로드 중 오류가 발생했습니다.");
     } finally {
       setIsUploading(false);
     }
   };
 
   const handleCancel = () => {
-    // 미리보기 URL 정리 (메모리 누수 방지)
-    if (previewImage) {
-      URL.revokeObjectURL(previewImage);
-    }
     setIsOpen(false);
     setSelectedDate(null);
     setSelectedMood("neutral");
@@ -199,14 +207,12 @@ export default function PaperDiaryUpload({
             return;
           }
 
-          // 최대 크기 설정 (모바일: 1200px, 데스크탑: 1920px)
           const maxWidth = window.innerWidth < 768 ? 1200 : 1920;
           const maxHeight = window.innerWidth < 768 ? 1600 : 2400;
 
           let width = img.width;
           let height = img.height;
 
-          // 비율 유지하면서 리사이즈
           if (width > maxWidth || height > maxHeight) {
             const ratio = Math.min(maxWidth / width, maxHeight / height);
             width = width * ratio;
@@ -217,9 +223,7 @@ export default function PaperDiaryUpload({
           canvas.height = height;
           ctx.drawImage(img, 0, 0, width, height);
 
-          // JPEG로 변환 (품질 0.85)
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
-          resolve(dataUrl);
+          resolve(canvas.toDataURL("image/jpeg", 0.85));
         };
         img.onerror = reject;
         img.src = e.target?.result as string;
@@ -239,8 +243,7 @@ export default function PaperDiaryUpload({
           byteNumbers[i] = byteCharacters.charCodeAt(i);
         }
         const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: "image/jpeg" });
-        resolve(blob);
+        resolve(new Blob([byteArray], { type: "image/jpeg" }));
       } catch (error) {
         reject(error);
       }
@@ -254,18 +257,11 @@ export default function PaperDiaryUpload({
   ) => {
     const demoEntries = getDemoEntries();
     const existingEntry = demoEntries.find((e) => e.date === date);
+    const { saveDemoEntry } = await import("@/lib/localStorage");
 
     if (existingEntry) {
-      // 기존 일기에 이미지 추가
-      const { saveDemoEntry } = await import("@/lib/localStorage");
-      saveDemoEntry({
-        ...existingEntry,
-        mood,
-        paper_diary_image: imageData,
-      });
+      saveDemoEntry({ ...existingEntry, mood, paper_diary_image: imageData });
     } else {
-      // 새 일기 생성 (이미지만 있는 경우)
-      const { saveDemoEntry } = await import("@/lib/localStorage");
       saveDemoEntry({
         id: `demo_${date}_${Date.now()}`,
         date,
@@ -345,11 +341,9 @@ function DatePickerModal({
     const startingDayOfWeek = firstDay.getDay();
 
     const days = [];
-    // 빈 칸 추가 (첫 주 시작일 맞추기)
     for (let i = 0; i < startingDayOfWeek; i++) {
       days.push(null);
     }
-    // 날짜 추가
     for (let day = 1; day <= daysInMonth; day++) {
       days.push(new Date(year, month, day));
     }
@@ -363,30 +357,16 @@ function DatePickerModal({
     return `${year}-${month}-${day}`;
   };
 
-  const isDateDisabled = (date: Date): boolean => {
-    const dateStr = formatDateString(date);
-    return existingDates.has(dateStr);
-  };
+  const isDateDisabled = (date: Date): boolean =>
+    existingDates.has(formatDateString(date));
 
-  const isDateInFuture = (date: Date): boolean => {
-    const dateStr = formatDateString(date);
-    return dateStr > today;
-  };
+  const isDateInFuture = (date: Date): boolean =>
+    formatDateString(date) > today;
 
   const days = getDaysInMonth(currentMonth);
   const monthNames = [
-    "1월",
-    "2월",
-    "3월",
-    "4월",
-    "5월",
-    "6월",
-    "7월",
-    "8월",
-    "9월",
-    "10월",
-    "11월",
-    "12월",
+    "1월","2월","3월","4월","5월","6월",
+    "7월","8월","9월","10월","11월","12월",
   ];
   const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
 
@@ -407,13 +387,11 @@ function DatePickerModal({
 
         <div className="mb-4 flex justify-between items-center">
           <button
-            onClick={() => {
-              const prevMonth = new Date(
-                currentMonth.getFullYear(),
-                currentMonth.getMonth() - 1
-              );
-              setCurrentMonth(prevMonth);
-            }}
+            onClick={() =>
+              setCurrentMonth(
+                new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1)
+              )
+            }
             className="px-3 py-1 text-text-secondary-light dark:text-text-secondary-dark hover:text-primary"
           >
             ←
@@ -422,13 +400,11 @@ function DatePickerModal({
             {currentMonth.getFullYear()}년 {monthNames[currentMonth.getMonth()]}
           </span>
           <button
-            onClick={() => {
-              const nextMonth = new Date(
-                currentMonth.getFullYear(),
-                currentMonth.getMonth() + 1
-              );
-              setCurrentMonth(nextMonth);
-            }}
+            onClick={() =>
+              setCurrentMonth(
+                new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1)
+              )
+            }
             className="px-3 py-1 text-text-secondary-light dark:text-text-secondary-dark hover:text-primary"
           >
             →
@@ -453,18 +429,12 @@ function DatePickerModal({
               const dateStr = formatDateString(date);
               const isDisabled = isDateDisabled(date) || isDateInFuture(date);
               const isSelected = selectedDate === dateStr;
-              const dayOfWeek = date.getDay(); // 0: 일요일, 6: 토요일
-              const isSunday = dayOfWeek === 0;
-              const isSaturday = dayOfWeek === 6;
+              const dayOfWeek = date.getDay();
 
-              // 일요일/토요일 색상 결정
               let dateColor = "";
               if (!isSelected && !isDisabled) {
-                if (isSunday) {
-                  dateColor = "text-[#d03232]";
-                } else if (isSaturday) {
-                  dateColor = "text-[#3c63e1]";
-                }
+                if (dayOfWeek === 0) dateColor = "text-[#d03232]";
+                else if (dayOfWeek === 6) dateColor = "text-[#3c63e1]";
               }
 
               return (

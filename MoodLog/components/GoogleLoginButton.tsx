@@ -1,36 +1,25 @@
 "use client";
 
-import { createClient } from "@/lib/supabase/client";
-
 export default function GoogleLoginButton() {
-  const handleLogin = async () => {
-    const supabase = createClient();
-
-    // 현재 브라우저의 origin 사용 (Vercel 배포 환경에서도 올바른 URL 사용)
-    const redirectTo = `${window.location.origin}/auth/callback`;
-
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo,
-        queryParams: {
-          access_type: "offline",
-          prompt: "consent",
-        },
-      },
-    });
-
-    if (error) {
-      // console.error("OAuth error:", error);
-      window.location.href = `/?error=auth_failed&message=${encodeURIComponent(
-        error.message
-      )}`;
+  const handleLogin = () => {
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      console.error("NEXT_PUBLIC_GOOGLE_CLIENT_ID is not set");
       return;
     }
 
-    if (data.url) {
-      window.location.href = data.url;
-    }
+    const redirectUri = `${window.location.origin}/auth/callback`;
+
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      scope: "openid email profile",
+      access_type: "offline",
+      prompt: "consent",
+    });
+
+    window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   };
 
   return (
