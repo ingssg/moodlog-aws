@@ -68,7 +68,9 @@ export async function GET(request: NextRequest) {
         maxAge,
         sameSite: "lax",
         secure: process.env.NODE_ENV === "production",
-        ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {}),
+        ...(process.env.NEXT_PUBLIC_COOKIE_DOMAIN || process.env.COOKIE_DOMAIN
+        ? { domain: process.env.NEXT_PUBLIC_COOKIE_DOMAIN || process.env.COOKIE_DOMAIN }
+        : {}),
       });
     }
 
