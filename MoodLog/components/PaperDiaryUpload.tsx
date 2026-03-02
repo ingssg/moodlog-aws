@@ -128,6 +128,7 @@ export default function PaperDiaryUpload({
             date: selectedDate,
             mood: selectedMood,
             content: "종이 일기",
+            skip_ai: true,
           }),
         });
         if (!entryRes.ok) {

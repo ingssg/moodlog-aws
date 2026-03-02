@@ -84,7 +84,7 @@ export class EntriesService {
 
   async upsertEntry(userId: string, dto: CreateEntryDto) {
     const date = new Date(dto.date + 'T00:00:00.000Z');
-    const aiComment = await this.bedrock.generateAiComment(dto.content, dto.mood);
+    const aiComment = dto.skip_ai ? null : await this.bedrock.generateAiComment(dto.content, dto.mood);
 
     const entry = await this.prisma.entry.upsert({
       where: { userId_date: { userId, date } },

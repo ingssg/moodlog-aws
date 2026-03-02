@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsDateString, IsOptional, IsIn, IsInt, Min, Max } from 'class-validator';
+import { IsString, IsNotEmpty, IsDateString, IsOptional, IsIn, IsInt, Min, Max, IsBoolean } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateEntryDto {
@@ -11,6 +11,10 @@ export class CreateEntryDto {
 
   @IsDateString()
   date!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  skip_ai?: boolean;
 }
 
 export class GetEntriesQueryDto {
