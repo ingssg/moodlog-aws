@@ -7,7 +7,15 @@ export async function GET(request: NextRequest) {
   const code = requestUrl.searchParams.get("code");
   const error = requestUrl.searchParams.get("error");
   const error_description = requestUrl.searchParams.get("error_description");
-  const origin = requestUrl.origin;
+
+  // Amplify SSR에서 request.url이 내부 localhost를 반환하므로
+  // x-forwarded-host 헤더로 실제 공개 도메인을 가져옴
+  const host =
+    request.headers.get("x-forwarded-host") ||
+    request.headers.get("host") ||
+    requestUrl.host;
+  const proto = request.headers.get("x-forwarded-proto") || "https";
+  const origin = `${proto}://${host}`;
 
   if (error || error_description) {
     return NextResponse.redirect(
